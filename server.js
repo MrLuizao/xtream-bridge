@@ -1,25 +1,33 @@
 const fastify = require('fastify')({ logger: true });
 const { pipeline } = require('stream/promises');
 const http = require('http');
+const fs = require('fs');
+const path = require('path');
 
 const PORT = 3000;
 // Reemplaza con la IP real de tu Mac/Servidor donde corra el motor de Ace Stream
-const ACE_STREAM_ENGINE = 'http://127.0.0.1:6878'; 
+const ACE_STREAM_ENGINE = 'http://127.0.0.1:6879'; 
 
-// "Base de Datos" local con tus Content IDs de Ace Stream
-const CHANNELS_DB = {
-  "101": {
-    "name": "DAZN 1",
-    "content_id": "414222dc7b69a626f29eb964450dae44b3bc9b36"
-  },
-  "102": {
-    "name": "DAZN 2",
-    "content_id": "dac18df259f44258d81aa8f31cb343bb837f5ac7"
-  },
-  "103": {
-    "name": "Onetoro TV",
-    "content_id": "889db6c87a28fd5b3092333b63bcdddf05d26216"
-  },
+const CHANNELS_FILE = path.join(__dirname, 'channels.json');
+
+// Helper to read channels from JSON file
+const getChannels = () => {
+  try {
+    const data = fs.readFileSync(CHANNELS_FILE, 'utf8');
+    return JSON.parse(data);
+  } catch (err) {
+    fastify.log.error('Error reading channels.json:', err);
+    return {};
+  }
+};
+
+// Helper to save channels to JSON file
+const saveChannels = (channels) => {
+  try {
+    fs.writeFileSync(CHANNELS_FILE, JSON.stringify(channels, null, 2), 'utf8');
+  } catch (err) {
+    fastify.log.error('Error saving channels.json:', err);
+  }
 };
 
 // =================================================================
@@ -72,9 +80,10 @@ fastify.get('/player_api.php', async (request, reply) => {
   // PASO C: Retornar Listado de Canales Mapeados
   if (action === 'get_live_streams') {
     if (category_id === '1' || category_id === '1') {
-      return Object.keys(CHANNELS_DB).map((id, index) => ({
+      const channelsDb = getChannels();
+      return Object.keys(channelsDb).map((id, index) => ({
         "num": index + 1,
-        "name": CHANNELS_DB[id].name,
+        "name": channelsDb[id].name,
         "stream_id": parseInt(id),
         "stream_type": "live",
         "category_id": "1",
@@ -108,7 +117,8 @@ fastify.get('/live/:username/:password/:streamId', async (request, reply) => {
     return reply.status(403).send('Unauthorized');
   }
 
-  const channel = CHANNELS_DB[idLimpio];
+  const channelsDb = getChannels();
+  const channel = channelsDb[idLimpio];
   if (!channel) {
     return reply.status(404).send('Canal no encontrado');
   }
@@ -155,6 +165,47 @@ fastify.get('/live/:username/:password/:streamId', async (request, reply) => {
   } catch (err) {
     fastify.log.error(`Error en el flujo del pipeline: ${err.message}`);
   }
+});
+// =================================================================
+// 3. ENDPOINT PARA ADMINISTRAR CANALES DINÁMICAMENTE
+// =================================================================
+fastify.post('/api/channels', async (request, reply) => {
+  // Autenticación simple (usa Bearer dev123 en el header de la petición)
+  const authHeader = request.headers.authorization;
+  if (authHeader !== 'Bearer dev123') {
+    return reply.status(403).send({ error: 'Unauthorized' });
+  }
+
+  const { id, name, content_id } = request.body;
+  
+  if (!id || !name || !content_id) {
+    return reply.status(400).send({ error: 'Faltan campos: id, name o content_id' });
+  }
+
+  const channelsDb = getChannels();
+  channelsDb[id] = { name, content_id };
+  saveChannels(channelsDb);
+
+  return { success: true, message: 'Canal agregado/actualizado', channel: channelsDb[id] };
+});
+
+fastify.delete('/api/channels/:id', async (request, reply) => {
+  const authHeader = request.headers.authorization;
+  if (authHeader !== 'Bearer dev123') {
+    return reply.status(403).send({ error: 'Unauthorized' });
+  }
+
+  const { id } = request.params;
+  const channelsDb = getChannels();
+  
+  if (!channelsDb[id]) {
+    return reply.status(404).send({ error: 'Canal no encontrado' });
+  }
+
+  delete channelsDb[id];
+  saveChannels(channelsDb);
+
+  return { success: true, message: 'Canal eliminado' };
 });
 
 // Inicialización del servidor escuchando en todas las interfaces de red de la Mac
