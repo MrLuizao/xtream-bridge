@@ -134,7 +134,8 @@ fastify.get('/live/:username/:password/:streamId', async (request, reply) => {
   // Función helper recursiva para seguir redirecciones HTTP (302) de Ace Stream
   const fetchStreamWithRedirects = (url) => {
     return new Promise((resolve, reject) => {
-      http.get(url, (res) => {
+      // Pasamos insecureHTTPParser para evitar que Node lance error si Ace Stream manda headers mal formados
+      http.get(url, { insecureHTTPParser: true }, (res) => {
         // Si el motor nos manda un 302, seguimos la nueva URL en el header location
         if (res.statusCode === 302 || res.statusCode === 301) {
           fastify.log.info(`Ace Stream redirigió (302) hacia: ${res.headers.location}`);
